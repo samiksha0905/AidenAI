@@ -262,6 +262,47 @@
   border-radius: var(--radius-sm);
 }
 
+/* Form Buttons */
+.form-buttons {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.form-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.yes-btn {
+  background: var(--secondary);
+  color: white;
+}
+
+.yes-btn:hover {
+  background: var(--secondary-dark);
+  transform: translateY(-1px);
+}
+
+.no-btn {
+  background: var(--gray-200);
+  color: var(--text-secondary);
+}
+
+.no-btn:hover {
+  background: var(--gray-300);
+  transform: translateY(-1px);
+}
+
 /* Typing Indicator */
 .typing-indicator .message-bubble {
   padding: 1rem 1.25rem;

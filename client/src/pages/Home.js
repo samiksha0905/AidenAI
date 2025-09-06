@@ -1,15 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Star, ArrowRight, Users, Award, Clock } from 'lucide-react';
 import { apiService } from '../utils/api';
 
 const Home = () => {
+  const navigate = useNavigate();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchServices();
   }, []);
+
+  // Listen for form fill events and redirect to a service page
+  useEffect(() => {
+    const handleFormFill = (event) => {
+      const data = event.detail;
+      console.log('📝 Home page received form data:', data);
+      
+      // Navigate to the first available service page to fill the form
+      if (services.length > 0) {
+        const firstService = services.find(s => s.featured) || services[0];
+        navigate(firstService.pageUrl);
+        
+        // Re-dispatch the event after navigation
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('fillForm', {
+            detail: data
+          }));
+        }, 1000);
+      }
+    };
+
+    window.addEventListener('fillForm', handleFormFill);
+    return () => window.removeEventListener('fillForm', handleFormFill);
+  }, [services, navigate]);
 
   const fetchServices = async () => {
     try {
