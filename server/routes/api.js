@@ -1,12 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Service = require('../models/Service');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const ContactForm = require('../models/ContactForm');
 const { mockServices } = require('../data/mockData');
-const fetch = require('node-fetch');
-
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'demo-key');
+// Note: fetch is globally available in Node.js 18+
 
 // Check if MongoDB is available
 const useMockData = !process.env.MONGO_URI || process.env.USE_MOCK_DATA === 'true';
@@ -76,6 +73,161 @@ router.post('/match', async (req, res) => {
   }
 
   try {
+    // FIRST: Extract form data from any query to check if it contains contact information
+    const extractFormData = (text) => {
+      const data = {};
+      
+      // Extract name - handle various natural language patterns
+      const namePatterns = [
+        // "Myself [Name]" pattern - stop before "and" or contact-related words
+        /(?:myself|my\s*self)\s+([a-zA-Z]+)(?=\s+(?:and|email|phone|contact|number|message|,|$))/i,
+        // "My name is [Name]" patterns
+        /(?:my\s+name\s+is|name\s+is|i\s+am|this\s+is)\s+([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|$))/i,
+        // "name: [Name]" or "name [Name]" patterns
+        /(?:name[:=]?)\s+([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|$))/i,
+        // Start of sentence name pattern
+        /^([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|here))/i
+      ];
+      
+      for (const pattern of namePatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          const name = match[1].trim().replace(/\s+/g, ' ');
+          // Avoid capturing common words that aren't names
+          if (!['email', 'phone', 'contact', 'number', 'message', 'and', 'the', 'my', 'is', 'are'].includes(name.toLowerCase())) {
+            data.name = name;
+            break;
+          }
+        }
+      }
+      
+      // Extract email - comprehensive patterns
+      const emailPatterns = [
+        // "My email is" patterns
+        /(?:my\s+email\s+(?:is|address\s+is)|email\s+is|email[:=]?)\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+        // Standalone email addresses
+        /\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/
+      ];
+      
+      for (const pattern of emailPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          data.email = match[1].trim();
+          break;
+        }
+      }
+      
+      // Extract phone number - dynamic patterns
+      const phonePatterns = [
+        // "contact number is", "contact info is", etc. - improved pattern
+        /(?:contact\s+(?:info|information|number|details)\s+is|contact\s+(?:info|information|number|details)[:=]?)\s*([+]?[0-9]{4,15})/i,
+        // "my contact is", "phone is", "number is"
+        /(?:my\s+(?:contact|phone|number)\s+is|phone\s+(?:number\s+)?is|number\s+is|phone[:=]?)\s*([+]?[0-9]{4,15})/i,
+        // "and contact number is" pattern
+        /(?:and\s+contact\s+(?:number|info)\s+is)\s*([+]?[0-9]{4,15})/i,
+        // Standalone phone numbers (optimized)
+        /\b([+]?[0-9]{8,15})\b/g
+      ];
+      
+      for (const pattern of phonePatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          let phone;
+          if (pattern.global) {
+            // For global patterns, find the best match (longest valid phone number)
+            const matches = [...text.matchAll(pattern)];
+            for (const m of matches) {
+              const candidate = m[1] ? m[1].trim() : m[0].trim();
+                const digitsOnly = candidate.replace(/[^0-9]/g, '');
+                if (digitsOnly.length >= 4 && digitsOnly.length <= 15) {
+                  phone = candidate;
+                  break;
+                }
+            }
+          } else {
+            phone = match[1].trim();
+          }
+          
+          if (phone) {
+            const digitsOnly = phone.replace(/[^0-9]/g, '');
+            // Validate it's actually a phone number (at least 4 digits for testing, up to 15)
+            if (digitsOnly.length >= 4 && digitsOnly.length <= 15) {
+              data.phone = phone;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Extract description/message - comprehensive patterns
+      const descPatterns = [
+        // "message is" with quoted content
+        /(?:message\s+is)\s+['\"]([^'\"]+)['\"]$/i,
+        // "message is" without quotes
+        /(?:message\s+is|my\s+message\s+is)\s+(.+?)$/i,
+        // "description is", "details is"
+        /(?:description\s+is|details\s+is|description[:=]|details[:=])\s+['\"]?(.+?)['\"]?$/i,
+        // "need", "want", "require", "looking for"
+        /(?:i\s+need|need|want|require|looking\s+for)\s+(.+?)$/i,
+        // Generic quoted message at the end
+        /['\"]([^'\"]{10,})['\"]\s*$/,
+        // Any remaining descriptive text after common patterns
+        /(?:and|,)\s+(.{10,})$/i
+      ];
+      
+      for (const pattern of descPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          let description = match[1].trim();
+          // Clean up quotes and extra whitespace
+          description = description.replace(/^['\"]|['\"]$/g, '').trim();
+          // Avoid capturing phone numbers, emails, or names as descriptions
+          if (description.length >= 5 && 
+              !description.match(/^[+]?[\d\s\-\(\)]+$/) && 
+              !description.match(/@/) &&
+              !description.match(/^[a-zA-Z\s]{1,30}$/)) {
+            data.description = description;
+            break;
+          }
+        }
+      }
+      
+      return data;
+    };
+    
+    // Extract form data from the query FIRST
+    const formData = extractFormData(query);
+    console.log('\ud83d\udcdd Extracted form data:', formData);
+    
+    // If we found any contact information, treat this as a form submission and return immediately
+    if (Object.keys(formData).length > 0) {
+      console.log('\ud83c\udf89 Auto-detected contact information, processing as form submission...');
+      
+      // Store form data in database if any data was extracted
+      try {
+        const contactFormEntry = new ContactForm({
+          ...formData,
+          originalQuery: query
+        });
+        await contactFormEntry.save();
+        console.log('\ud83d\udcbe Form data saved to database with ID:', contactFormEntry._id);
+      } catch (saveError) {
+        console.error('\u274c Error saving form data:', saveError.message);
+      }
+      
+      return res.json({
+        internal: {
+          match: null,
+          route: null
+        },
+        external: [],
+        specialAction: "fill_form",
+        formData: formData,
+        message: `Thank you${formData.name ? ', ' + formData.name : ''}! I've captured your information${Object.keys(formData).length > 0 ? ': ' + Object.keys(formData).join(', ') : ''}.`
+      });
+    }
+    
+    // If no form data was found, proceed with normal service matching
     let services;
     if (useMockData) {
       services = mockServices;
@@ -83,12 +235,30 @@ router.post('/match', async (req, res) => {
       services = await Service.find({});
     }
 
+    // Check for special navigation commands
+    const lowerQuery = query.toLowerCase();
+    
+    // Home navigation commands
+    if (lowerQuery.includes('home') || lowerQuery.includes('main page') || lowerQuery.includes('go back')) {
+      return res.json({
+        internal: {
+          match: "Home Page",
+          route: "/"
+        },
+        external: [],
+        specialAction: "navigate_home"
+      });
+    }
+    
     // Create the prompt for Gemini API
     const serviceList = services.map(s => `- ${s.name} (${s.pageUrl}) - Keywords: ${s.keywords.join(', ')}`).join('\n');
     const prompt = `You are a smart routing assistant for a services web application.
 
 Available internal services:
 ${serviceList}
+
+Special commands:
+- If user asks to go "home" or "back" → match: "Home Page", route: "/"
 
 For the user query "${query}", you need to:
 1. Analyze if the query matches any of our internal services based on keywords
@@ -104,13 +274,15 @@ For the user query "${query}", you need to:
   "external": [
     "https://www.google.com/search?q=${encodeURIComponent(query)}",
     "https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}"
-  ]
+  ],
+  "askForm": true
 }
 
 Examples:
-- Query "I need plumbing" → match: "Plumbing Services", route: "/plumbing"
-- Query "math help" → match: "Tutoring Services", route: "/tutoring"
-- Query "random topic" → match: null, route: null
+- Query "I need plumbing" → match: "Plumbing Services", route: "/plumbing", askForm: true
+- Query "math help" → match: "Tutoring Services", route: "/tutoring", askForm: true
+- Query "go home" → match: "Home Page", route: "/", askForm: false
+- Query "random topic" → match: null, route: null, askForm: false
 
 User query: "${query}"`;
 
@@ -244,6 +416,124 @@ User query: "${query}"`;
       external: [
         `https://www.google.com/search?q=${encodeURIComponent(query)}`
       ]
+    });
+  }
+});
+
+// Route to handle direct form submissions
+router.post('/contact-form', async (req, res) => {
+  try {
+    const { name, email, phone, description, serviceInterest, originalQuery } = req.body;
+    
+    // Only save fields that have values
+    const formData = {};
+    if (name && name.trim()) formData.name = name.trim();
+    if (email && email.trim()) formData.email = email.trim();
+    if (phone && phone.trim()) formData.phone = phone.trim();
+    if (description && description.trim()) formData.description = description.trim();
+    if (serviceInterest && serviceInterest.trim()) formData.serviceInterest = serviceInterest.trim();
+    if (originalQuery && originalQuery.trim()) formData.originalQuery = originalQuery.trim();
+    
+    if (Object.keys(formData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid form data provided'
+      });
+    }
+    
+    const contactForm = new ContactForm(formData);
+    await contactForm.save();
+    
+    res.json({
+      success: true,
+      message: 'Contact information saved successfully!',
+      data: {
+        id: contactForm._id,
+        fields: Object.keys(formData)
+      }
+    });
+    
+  } catch (error) {
+    console.error('Contact form submission error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save contact information'
+    });
+  }
+});
+
+// Route to get all form submissions (for admin use)
+router.get('/contact-forms', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const status = req.query.status;
+    
+    const query = status ? { status } : {};
+    
+    const forms = await ContactForm.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const total = await ContactForm.countDocuments(query);
+    
+    res.json({
+      success: true,
+      data: forms,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching contact forms:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch contact forms'
+    });
+  }
+});
+
+// Route to update form status
+router.patch('/contact-forms/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    if (!['new', 'contacted', 'resolved'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid status. Must be: new, contacted, or resolved'
+      });
+    }
+    
+    const form = await ContactForm.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+    
+    if (!form) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Status updated successfully',
+      data: form
+    });
+    
+  } catch (error) {
+    console.error('Error updating form status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update form status'
     });
   }
 });

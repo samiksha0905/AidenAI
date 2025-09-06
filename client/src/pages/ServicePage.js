@@ -1,18 +1,81 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Star, Phone, Mail, MapPin, Clock } from 'lucide-react';
 import { apiService } from '../utils/api';
 
 const ServicePage = () => {
   const { serviceUrl } = useParams();
+  const navigate = useNavigate();
   const [service, setService] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    description: ''
+  });
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
   useEffect(() => {
     if (serviceUrl) {
       fetchService();
     }
   }, [serviceUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for form fill events from chatbot
+  useEffect(() => {
+    const handleFormFill = (event) => {
+      const data = event.detail;
+      console.log('📝 Received form data:', data);
+      
+      // Update form fields
+      setFormData({
+        name: data.name || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        description: data.description || ''
+      });
+      
+      // Scroll to contact form after a short delay
+      setTimeout(() => {
+        const contactForm = document.querySelector('.contact-form');
+        if (contactForm) {
+          contactForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Highlight the form briefly
+          contactForm.style.boxShadow = '0 0 20px var(--primary)';
+          setTimeout(() => {
+            contactForm.style.boxShadow = 'var(--shadow-lg)';
+          }, 2000);
+        }
+      }, 1000);
+    };
+
+    window.addEventListener('fillForm', handleFormFill);
+    return () => window.removeEventListener('fillForm', handleFormFill);
+  }, []);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    console.log('📨 Form submitted:', formData);
+    
+    // Show success popup
+    setShowSuccessPopup(true);
+    
+    // Navigate to home after 3 seconds
+    setTimeout(() => {
+      setShowSuccessPopup(false);
+      navigate('/');
+    }, 3000);
+  };
 
   const fetchService = async () => {
     try {
@@ -148,15 +211,38 @@ const ServicePage = () => {
             </div>
             
             <div className="contact-form">
-              <form>
+              <form onSubmit={handleFormSubmit}>
                 <div className="form-row">
-                  <input type="text" placeholder="Your Name" required />
-                  <input type="email" placeholder="Your Email" required />
+                  <input 
+                    type="text" 
+                    name="name"
+                    placeholder="Your Name" 
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    required 
+                  />
+                  <input 
+                    type="email" 
+                    name="email"
+                    placeholder="Your Email" 
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    required 
+                  />
                 </div>
-                <input type="tel" placeholder="Phone Number" />
+                <input 
+                  type="tel" 
+                  name="phone"
+                  placeholder="Phone Number" 
+                  value={formData.phone}
+                  onChange={handleInputChange}
+                />
                 <textarea 
+                  name="description"
                   placeholder="Describe your project or needs..."
                   rows={4}
+                  value={formData.description}
+                  onChange={handleInputChange}
                   required
                 ></textarea>
                 <button type="submit" className="submit-button">
@@ -167,6 +253,19 @@ const ServicePage = () => {
           </div>
         </div>
       </section>
+      
+      {/* Success Popup */}
+      {showSuccessPopup && (
+        <div className="success-popup-overlay">
+          <div className="success-popup">
+            <div className="success-icon">✓</div>
+            <h3>Form Submitted Successfully!</h3>
+            <p>Thank you for your inquiry. We'll get back to you soon!</p>
+            <div className="success-spinner"></div>
+            <p className="redirect-text">Redirecting to home page...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

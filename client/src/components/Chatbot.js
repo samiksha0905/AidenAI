@@ -1,19 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, X, Send, Loader, Bot, User } from 'lucide-react';
+import { useChatContext } from '../contexts/ChatContext';
 import { apiService } from '../utils/api';
 import './Chatbot.css';
 
 const Chatbot = () => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      text: "Hi there! 👋 I'm your personal service assistant. I can help you find the right service or navigate to specific sections. Just ask me something like 'I need a plumber' or 'help with math tutoring'!",
-      from: 'bot',
-      timestamp: new Date()
-    }
-  ]);
+  const {
+    isChatOpen: isOpen,
+    messages,
+    setMessages,
+    toggleChat
+  } = useChatContext();
+  
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -55,11 +54,46 @@ const Chatbot = () => {
       const data = await response.json();
       
       setTimeout(() => {
-        // Handle internal service match (auto-navigation)
-        if (data.internal?.match && data.internal?.route) {
+        // Handle form filling requests
+        if (data.specialAction === 'fill_form') {
           const botMessage = {
             id: Date.now() + 1,
-            text: `Perfect! I found ${data.internal.match} for you. Navigating there now...`,
+            text: `Perfect! I've extracted your form data. Let me find a contact form and fill it out for you! 📝`,
+            from: 'bot',
+            timestamp: new Date()
+          };
+          
+          setMessages(prev => [...prev, botMessage]);
+          setIsTyping(false);
+          setIsLoading(false);
+          
+          // Broadcast form data to all components
+          window.dispatchEvent(new CustomEvent('fillForm', {
+            detail: data.formData
+          }));
+          
+          // Add confirmation message
+          setTimeout(() => {
+            const confirmMessage = {
+              id: Date.now() + 2,
+              text: `Form data ready! I'll scroll to the contact form and fill it out for you. 🎉`,
+              from: 'bot',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, confirmMessage]);
+          }, 1500);
+          
+          return;
+        }
+        
+        // Handle internal service match (auto-navigation)
+        if (data.internal?.match && data.internal?.route) {
+          const isHomePage = data.internal.route === '/';
+          const botMessage = {
+            id: Date.now() + 1,
+            text: isHomePage 
+              ? `Taking you back to the home page! 🏠`
+              : `Perfect! I found ${data.internal.match} for you. Navigating there now... ✨`,
             from: 'bot',
             timestamp: new Date(),
             service: data.internal.match
@@ -72,7 +106,23 @@ const Chatbot = () => {
           // Auto-navigate to the matched service
           setTimeout(() => {
             navigate(data.internal.route);
-            setIsOpen(false); // Close chatbot after navigation
+            
+            // If it's a service page and askForm is true, ask about form
+            if (!isHomePage && data.askForm) {
+              setTimeout(() => {
+                const formMessage = {
+                  id: Date.now() + 2,
+                  text: `Would you like to fill out a contact form for ${data.internal.match}? I can take you to the contact section! 📋`,
+                  from: 'bot',
+                  timestamp: new Date(),
+                  showFormButtons: true,
+                  servicePage: data.internal.route
+                };
+                setMessages(prev => [...prev, formMessage]);
+                // Keep chatbot open for form question
+              }, 3000);
+            }
+            // Keep chatbot open after all navigations
           }, 1500);
         } else {
           // No internal match - show external references
@@ -132,9 +182,6 @@ const Chatbot = () => {
     }
   };
 
-  const toggleChat = () => {
-    setIsOpen(!isOpen);
-  };
 
   const formatTime = (timestamp) => {
     return new Date(timestamp).toLocaleTimeString('en-US', {
@@ -142,6 +189,36 @@ const Chatbot = () => {
       minute: '2-digit',
       hour12: true
     });
+  };
+
+  const handleFormNavigation = (servicePage, shouldNavigate) => {
+    if (shouldNavigate) {
+      // Scroll to contact section
+      setTimeout(() => {
+        const contactSection = document.querySelector('.contact-section');
+        if (contactSection) {
+          contactSection.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 500);
+      
+      const confirmMessage = {
+        id: Date.now(),
+        text: "Great! I've scrolled you to the contact form section. Feel free to fill it out! 😊 Is there anything else I can help you with?",
+        from: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, confirmMessage]);
+    } else {
+      const declineMessage = {
+        id: Date.now(),
+        text: "No problem! Is there anything else I can help you with? 😄",
+        from: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, declineMessage]);
+    }
+    
+    // Keep chatbot open for further assistance
   };
 
   const getMessageIcon = (message) => {
@@ -191,7 +268,7 @@ const Chatbot = () => {
                   {getMessageIcon(message)}
                 </div>
                 <div className="message-content">
-                <div className="message-bubble">
+                  <div className="message-bubble">
                     {message.isLink ? (
                       <a 
                         href={message.text} 
@@ -209,6 +286,22 @@ const Chatbot = () => {
                         <span className="service-tag">
                           {message.service}{message.section && ` → ${message.section}`}
                         </span>
+                      </div>
+                    )}
+                    {message.showFormButtons && (
+                      <div className="form-buttons">
+                        <button 
+                          className="form-btn yes-btn"
+                          onClick={() => handleFormNavigation(message.servicePage, true)}
+                        >
+                          Yes, take me to the form! 📋
+                        </button>
+                        <button 
+                          className="form-btn no-btn"
+                          onClick={() => handleFormNavigation(message.servicePage, false)}
+                        >
+                          No, thanks 😊
+                        </button>
                       </div>
                     )}
                   </div>

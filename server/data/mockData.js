@@ -41,7 +41,7 @@ const mockServices = [
     description: 'Expert tutoring services for students of all ages. Math, Science, English, and more.',
     icon: '📚',
     color: '#059669',
-    keywords: ['tutor', 'education', 'learning', 'study', 'homework', 'math', 'science', 'english', 'student', 'teaching'],
+    keywords: ['tutor', 'education', 'learning', 'study', 'homework', 'math', 'science', 'english', 'student', 'teaching','teach'],
     featured: true,
     rating: 4.9,
     reviews: 89,
