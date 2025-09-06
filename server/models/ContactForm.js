@@ -22,7 +22,7 @@ const contactFormSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: function(v) {
-        return !v || v.replace(/[^0-9]/g, '').length >= 4;
+        return !v || v.replace(/[^0-9]/g, '').length >= 3;
       },
       message: props => `${props.value} is not a valid phone number!`
     }
