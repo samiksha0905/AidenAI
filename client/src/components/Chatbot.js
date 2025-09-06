@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { MessageCircle, X, Send, Loader, Bot, User } from 'lucide-react';
 import { useChatContext } from '../contexts/ChatContext';
 import { apiService } from '../utils/api';
@@ -18,6 +18,7 @@ const Chatbot = () => {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -26,6 +27,15 @@ const Chatbot = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Clear form data when user navigates between pages
+  useEffect(() => {
+    console.log('🧹 Chatbot: Dispatching clear form event for:', location.pathname);
+    // Dispatch a clear form event to all listening components
+    window.dispatchEvent(new CustomEvent('clearForm', {
+      detail: { path: location.pathname }
+    }));
+  }, [location.pathname]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;

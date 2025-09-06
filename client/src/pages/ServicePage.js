@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Star, Phone, Mail, MapPin, Clock } from 'lucide-react';
 import { apiService } from '../utils/api';
 
 const ServicePage = () => {
   const { serviceUrl } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [service, setService] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
@@ -16,13 +17,24 @@ const ServicePage = () => {
   });
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
+  // Clear form data when page/service changes
+  useEffect(() => {
+    console.log('🧹 Clearing form data due to navigation to:', location.pathname);
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      description: ''
+    });
+  }, [location.pathname, serviceUrl]);
+
   useEffect(() => {
     if (serviceUrl) {
       fetchService();
     }
   }, [serviceUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listen for form fill events from chatbot
+  // Listen for form fill and clear events from chatbot
   useEffect(() => {
     const handleFormFill = (event) => {
       const data = event.detail;
@@ -51,8 +63,22 @@ const ServicePage = () => {
       }, 1000);
     };
 
+    const handleFormClear = (event) => {
+      console.log('🧹 ServicePage: Clearing form data due to navigation');
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        description: ''
+      });
+    };
+
     window.addEventListener('fillForm', handleFormFill);
-    return () => window.removeEventListener('fillForm', handleFormFill);
+    window.addEventListener('clearForm', handleFormClear);
+    return () => {
+      window.removeEventListener('fillForm', handleFormFill);
+      window.removeEventListener('clearForm', handleFormClear);
+    };
   }, []);
 
   const handleInputChange = (e) => {

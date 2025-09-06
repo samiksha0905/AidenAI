@@ -73,130 +73,133 @@ router.post('/match', async (req, res) => {
   }
 
   try {
-    // FIRST: Extract form data from any query to check if it contains contact information
-    const extractFormData = (text) => {
-      const data = {};
+    // FIRST: Use AI to extract form data from any query for perfect accuracy
+    const extractFormDataWithAI = async (text) => {
+      const prompt = `Extract contact information from this text and return ONLY a JSON object with the fields that are present. Do not include fields that are not mentioned.
+
+Rules:
+- name: Extract only the person's actual name (not descriptive words)
+- email: Extract email addresses
+- phone: Extract phone/contact numbers (any length)
+- description: Extract any message, description, or additional text that's not name/email/phone
+
+Text: "${text}"
+
+Return only valid JSON with only the fields that exist in the text:`;
+
+      // Check if API key exists
+      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'demo-key') {
+        console.log('⚠️ No valid Gemini API key, using fallback extraction');
+        return fallbackExtraction(text);
+      }
       
-      // Extract name - handle various natural language patterns
-      const namePatterns = [
-        // "Myself [Name]" pattern - stop before "and" or contact-related words
-        /(?:myself|my\s*self)\s+([a-zA-Z]+)(?=\s+(?:and|email|phone|contact|number|message|,|$))/i,
-        // "My name is [Name]" patterns
-        /(?:my\s+name\s+is|name\s+is|i\s+am|this\s+is)\s+([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|$))/i,
-        // "name: [Name]" or "name [Name]" patterns
-        /(?:name[:=]?)\s+([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|$))/i,
-        // Start of sentence name pattern
-        /^([a-zA-Z][a-zA-Z\s]{0,20})(?=\s*[,.]|\s+(?:and|email|phone|contact|number|message|here))/i
-      ];
-      
-      for (const pattern of namePatterns) {
-        const match = text.match(pattern);
-        if (match) {
-          const name = match[1].trim().replace(/\s+/g, ' ');
-          // Avoid capturing common words that aren't names
-          if (!['email', 'phone', 'contact', 'number', 'message', 'and', 'the', 'my', 'is', 'are'].includes(name.toLowerCase())) {
-            data.name = name;
-            break;
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{ text: prompt }]
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 256,
+              }
+            })
           }
-        }
-      }
-      
-      // Extract email - comprehensive patterns
-      const emailPatterns = [
-        // "My email is" patterns
-        /(?:my\s+email\s+(?:is|address\s+is)|email\s+is|email[:=]?)\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
-        // Standalone email addresses
-        /\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/
-      ];
-      
-      for (const pattern of emailPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-          data.email = match[1].trim();
-          break;
-        }
-      }
-      
-      // Extract phone number - dynamic patterns
-      const phonePatterns = [
-        // "contact number is", "contact info is", etc. - improved pattern
-        /(?:contact\s+(?:info|information|number|details)\s+is|contact\s+(?:info|information|number|details)[:=]?)\s*([+]?[0-9]{4,15})/i,
-        // "my contact is", "phone is", "number is"
-        /(?:my\s+(?:contact|phone|number)\s+is|phone\s+(?:number\s+)?is|number\s+is|phone[:=]?)\s*([+]?[0-9]{4,15})/i,
-        // "and contact number is" pattern
-        /(?:and\s+contact\s+(?:number|info)\s+is)\s*([+]?[0-9]{4,15})/i,
-        // Standalone phone numbers (optimized)
-        /\b([+]?[0-9]{8,15})\b/g
-      ];
-      
-      for (const pattern of phonePatterns) {
-        const match = text.match(pattern);
-        if (match) {
-          let phone;
-          if (pattern.global) {
-            // For global patterns, find the best match (longest valid phone number)
-            const matches = [...text.matchAll(pattern)];
-            for (const m of matches) {
-              const candidate = m[1] ? m[1].trim() : m[0].trim();
-                const digitsOnly = candidate.replace(/[^0-9]/g, '');
-                if (digitsOnly.length >= 4 && digitsOnly.length <= 15) {
-                  phone = candidate;
-                  break;
-                }
-            }
-          } else {
-            phone = match[1].trim();
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const aiText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+          
+          // Clean up the AI response to extract JSON
+          let cleanText = aiText.trim();
+          if (cleanText.includes('```json')) {
+            cleanText = cleanText.split('```json')[1].split('```')[0].trim();
+          } else if (cleanText.includes('```')) {
+            cleanText = cleanText.split('```')[1].split('```')[0].trim();
           }
           
-          if (phone) {
-            const digitsOnly = phone.replace(/[^0-9]/g, '');
-            // Validate it's actually a phone number (at least 4 digits for testing, up to 15)
-            if (digitsOnly.length >= 4 && digitsOnly.length <= 15) {
-              data.phone = phone;
-              break;
-            }
+          try {
+            const extractedData = JSON.parse(cleanText);
+            console.log('🤖 AI extracted form data:', extractedData);
+            return extractedData;
+          } catch (parseError) {
+            console.log('⚠️ AI JSON parse failed, using fallback extraction');
+            return fallbackExtraction(text);
+          }
+        } else {
+          console.log('⚠️ AI API failed, using fallback extraction');
+          return fallbackExtraction(text);
+        }
+      } catch (error) {
+        console.log('⚠️ AI extraction error, using fallback:', error.message);
+        return fallbackExtraction(text);
+      }
+    };
+    
+    // Fallback extraction using improved patterns
+    const fallbackExtraction = (text) => {
+      const data = {};
+      
+      // Name extraction - improved patterns
+      let nameMatch = text.match(/(?:my\s+name\s+is|myself|i\s+am)\s+([a-zA-Z]+)/i);
+      if (nameMatch) {
+        data.name = nameMatch[1];
+      }
+      
+      // Email extraction - find any email
+      const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+      if (emailMatch) {
+        data.email = emailMatch[1];
+      }
+      
+      // Phone extraction - improved patterns for comma-separated input
+      let phoneMatch = text.match(/contact\s+is\s+([0-9]{3,15})/i);
+      if (!phoneMatch) {
+        phoneMatch = text.match(/(?:phone\s+is|number\s+is)\s*([0-9]{3,15})/i);
+      }
+      if (!phoneMatch) {
+        phoneMatch = text.match(/contact\s+(?:number|info)\s+is\s+([0-9]{3,15})/i);
+      }
+      if (!phoneMatch) {
+        // Look for patterns like "contact is 123" or just numbers after contact-related words
+        const numbers = text.match(/(?:contact|phone|number)\s*[:=]?\s*([0-9]{3,15})/gi);
+        if (numbers && numbers.length > 0) {
+          const lastMatch = numbers[numbers.length - 1].match(/([0-9]{3,15})/);
+          if (lastMatch) {
+            phoneMatch = [null, lastMatch[1]];
           }
         }
       }
-      
-      // Extract description/message - comprehensive patterns
-      const descPatterns = [
-        // "message is" with quoted content
-        /(?:message\s+is)\s+['\"]([^'\"]+)['\"]$/i,
-        // "message is" without quotes
-        /(?:message\s+is|my\s+message\s+is)\s+(.+?)$/i,
-        // "description is", "details is"
-        /(?:description\s+is|details\s+is|description[:=]|details[:=])\s+['\"]?(.+?)['\"]?$/i,
-        // "need", "want", "require", "looking for"
-        /(?:i\s+need|need|want|require|looking\s+for)\s+(.+?)$/i,
-        // Generic quoted message at the end
-        /['\"]([^'\"]{10,})['\"]\s*$/,
-        // Any remaining descriptive text after common patterns
-        /(?:and|,)\s+(.{10,})$/i
-      ];
-      
-      for (const pattern of descPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-          let description = match[1].trim();
-          // Clean up quotes and extra whitespace
-          description = description.replace(/^['\"]|['\"]$/g, '').trim();
-          // Avoid capturing phone numbers, emails, or names as descriptions
-          if (description.length >= 5 && 
-              !description.match(/^[+]?[\d\s\-\(\)]+$/) && 
-              !description.match(/@/) &&
-              !description.match(/^[a-zA-Z\s]{1,30}$/)) {
-            data.description = description;
-            break;
-          }
-        }
+      if (phoneMatch && phoneMatch[1]) {
+        data.phone = phoneMatch[1];
       }
+      
+      // Description extraction - improved patterns
+      let descMatch = text.match(/description\s+is\s*["']([^"']+)["']/i);
+      if (!descMatch) {
+        descMatch = text.match(/message\s+is\s*["']([^"']+)["']/i);
+      }
+      if (!descMatch) {
+        descMatch = text.match(/description\s+is\s+([^,]+)/i);
+      }
+      if (descMatch) {
+        data.description = descMatch[1].trim();
+      }
+      
+      console.log('🔍 Fallback extraction details:');
+      console.log('- Name patterns tried on:', text);
+      console.log('- Extracted data:', data);
       
       return data;
     };
     
-    // Extract form data from the query FIRST
-    const formData = extractFormData(query);
+    // Extract form data from the query FIRST using AI
+    const formData = await extractFormDataWithAI(query);
     console.log('\ud83d\udcdd Extracted form data:', formData);
     
     // If we found any contact information, treat this as a form submission and return immediately
