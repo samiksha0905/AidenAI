@@ -9,7 +9,7 @@ const Chatbot = () => {
   const [messages, setMessages] = useState([
     {
       id: 1,
-      text: "Hi there! 👋 I'm your personal service assistant. I can help you find the right service or navigate to specific sections. Just ask me something like 'I need a plumber' or 'help with math tutoring'!",
+      text: "Hi there! 👋 I'm your personal assistant. I can help you find the right service or navigate to specific sections. Just ask me something like 'I need a plumber' or 'help with math tutoring'!",
       from: 'bot',
       timestamp: new Date()
     }
