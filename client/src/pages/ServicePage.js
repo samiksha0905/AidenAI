@@ -17,16 +17,8 @@ const ServicePage = () => {
   });
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
-  // Clear form data when page/service changes
-  useEffect(() => {
-    console.log('🧹 Clearing form data due to navigation to:', location.pathname);
-    setFormData({
-      name: '',
-      email: '',
-      phone: '',
-      description: ''
-    });
-  }, [location.pathname, serviceUrl]);
+  // Only clear form data when explicitly requested via clearForm event
+  // Remove automatic clearing on navigation to allow form data to persist
 
   useEffect(() => {
     if (serviceUrl) {

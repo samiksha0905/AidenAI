@@ -12,29 +12,18 @@ const Home = () => {
     fetchServices();
   }, []);
 
-  // Listen for form fill events and redirect to a service page
+  // Listen for form fill events on home page (just log, don't navigate)
   useEffect(() => {
     const handleFormFill = (event) => {
       const data = event.detail;
-      console.log('📝 Home page received form data:', data);
-      
-      // Navigate to the first available service page to fill the form
-      if (services.length > 0) {
-        const firstService = services.find(s => s.featured) || services[0];
-        navigate(firstService.pageUrl);
-        
-        // Re-dispatch the event after navigation
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('fillForm', {
-            detail: data
-          }));
-        }, 1000);
-      }
+      console.log('📝 Home page received form data (staying on home):', data);
+      // Note: Home page doesn't have a contact form, so we just log the data
+      // Form data will be injected when user navigates to a service page
     };
 
     window.addEventListener('fillForm', handleFormFill);
     return () => window.removeEventListener('fillForm', handleFormFill);
-  }, [services, navigate]);
+  }, []);
 
   const fetchServices = async () => {
     try {

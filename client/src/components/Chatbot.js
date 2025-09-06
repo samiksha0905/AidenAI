@@ -28,14 +28,8 @@ const Chatbot = () => {
     scrollToBottom();
   }, [messages]);
 
-  // Clear form data when user navigates between pages
-  useEffect(() => {
-    console.log('🧹 Chatbot: Dispatching clear form event for:', location.pathname);
-    // Dispatch a clear form event to all listening components
-    window.dispatchEvent(new CustomEvent('clearForm', {
-      detail: { path: location.pathname }
-    }));
-  }, [location.pathname]);
+  // Only clear form data when user interacts with chatbot again
+  // Remove automatic clearing on navigation to preserve form data across pages
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -52,6 +46,12 @@ const Chatbot = () => {
     setInput('');
     setIsLoading(true);
     setIsTyping(true);
+    
+    // Clear any existing form data when user types a new query
+    console.log('🧹 Chatbot: User typed new query, clearing any existing form data');
+    window.dispatchEvent(new CustomEvent('clearForm', {
+      detail: { reason: 'new_query', query: userQuery }
+    }));
 
     try {
       // Call the new /api/match endpoint
