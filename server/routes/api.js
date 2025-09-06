@@ -84,26 +84,39 @@ router.post('/match', async (req, res) => {
     }
 
     // Create the prompt for Gemini API
-    const serviceList = services.map(s => `- ${s.name} (${s.pageUrl})`).join('\n');
-    const prompt = `
-You are a routing assistant for a services web app.
+    const serviceList = services.map(s => `- ${s.name} (${s.pageUrl}) - Keywords: ${s.keywords.join(', ')}`).join('\n');
+    const prompt = `You are a smart routing assistant for a services web application.
 
-Internal services:
+Available internal services:
 ${serviceList}
 
-For any user query:
-1. Identify the best matching internal service (if any).
-2. Always provide external reference links (search-style links).
-3. Return JSON strictly like this:
+For the user query "${query}", you need to:
+1. Analyze if the query matches any of our internal services based on keywords
+2. If there's a match, return the service name and route
+3. Always provide 2-3 relevant external reference links
+4. Respond ONLY with valid JSON in this exact format:
+
 {
-  "internal": { "match": "<service|null>", "route": "<path|null>" },
-  "external": ["link1","link2"]
+  "internal": {
+    "match": "exact service name or null",
+    "route": "exact route path or null"
+  },
+  "external": [
+    "https://www.google.com/search?q=${encodeURIComponent(query)}",
+    "https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}"
+  ]
 }
 
-User query: "${query}"
-`;
+Examples:
+- Query "I need plumbing" → match: "Plumbing Services", route: "/plumbing"
+- Query "math help" → match: "Tutoring Services", route: "/tutoring"
+- Query "random topic" → match: null, route: null
+
+User query: "${query}"`;
 
     try {
+      console.log('🤖 Calling Gemini API with query:', query);
+      
       // Use Gemini API to get response
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -111,13 +124,26 @@ User query: "${query}"
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{
+              parts: [{ text: prompt }]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 1024,
+            }
           })
         }
       );
 
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+      }
+
       const data = await response.json();
+      console.log('🔍 Gemini API response:', JSON.stringify(data, null, 2));
+      
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+      console.log('📝 Raw text response:', text);
       
       // Clean up the response to extract JSON
       let cleanText = text.trim();
@@ -127,34 +153,76 @@ User query: "${query}"
         cleanText = cleanText.split('```')[1].split('```')[0].trim();
       }
       
+      console.log('🧹 Cleaned text:', cleanText);
+      
       try {
         const parsedResponse = JSON.parse(cleanText);
+        console.log('✅ Parsed response:', parsedResponse);
         res.json(parsedResponse);
       } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        // Fallback response
+        console.error('❌ JSON parse error:', parseError);
+        console.log('🔧 Using intelligent fallback...');
+        
+        // Intelligent fallback - try to match keywords manually
+        const lowerQuery = query.toLowerCase();
+        let matchedService = null;
+        
+        for (const service of services) {
+          if (service.keywords.some(k => lowerQuery.includes(k.toLowerCase()))) {
+            matchedService = service;
+            break;
+          }
+        }
+        
         res.json({
-          internal: { match: null, route: null },
+          internal: {
+            match: matchedService ? matchedService.name : null,
+            route: matchedService ? matchedService.pageUrl : null
+          },
           external: [
             `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-            `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`
+            `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`,
+            `https://www.bing.com/search?q=${encodeURIComponent(query)}`
           ]
         });
       }
 
     } catch (geminiError) {
-      console.error('Gemini API error:', geminiError);
+      console.error('🚨 Gemini API error:', geminiError.message);
+      console.log('🔄 Using intelligent fallback matching...');
       
-      // Fallback logic - simple keyword matching
-      const lowerCaseQuery = query.toLowerCase();
+      // Enhanced fallback logic - multiple matching strategies
+      const lowerQuery = query.toLowerCase();
       let matchedService = null;
+      let confidence = 0;
       
       for (const service of services) {
-        if (service.keywords.some(k => lowerCaseQuery.includes(k.toLowerCase()))) {
+        let serviceConfidence = 0;
+        
+        // Check exact keyword matches
+        const keywordMatches = service.keywords.filter(k => lowerQuery.includes(k.toLowerCase()));
+        serviceConfidence += keywordMatches.length * 2;
+        
+        // Check service name similarity
+        if (lowerQuery.includes(service.name.toLowerCase())) {
+          serviceConfidence += 3;
+        }
+        
+        // Check partial matches in service name
+        const nameWords = service.name.toLowerCase().split(' ');
+        nameWords.forEach(word => {
+          if (lowerQuery.includes(word) && word.length > 3) {
+            serviceConfidence += 1;
+          }
+        });
+        
+        if (serviceConfidence > confidence) {
+          confidence = serviceConfidence;
           matchedService = service;
-          break;
         }
       }
+      
+      console.log(`🎯 Match found: ${matchedService ? matchedService.name : 'None'} (confidence: ${confidence})`);
       
       res.json({
         internal: {
@@ -163,7 +231,8 @@ User query: "${query}"
         },
         external: [
           `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-          `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`
+          `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`,
+          `https://www.bing.com/search?q=${encodeURIComponent(query)}`
         ]
       });
     }
